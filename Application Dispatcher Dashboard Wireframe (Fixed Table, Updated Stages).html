@@ -1,0 +1,287 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Application Dispatcher Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: Arial, sans-serif; }
+    body { display: flex; min-height: 100vh; background: #f0f0f0; }
+    .sidebar { width: 200px; background: #e0e0e0; padding: 20px; position: fixed; height: 100%; }
+    .sidebar ul { list-style: none; }
+    .sidebar li { margin: 10px 0; }
+    .sidebar a { text-decoration: none; color: #333; }
+    .header { background: #d0d0d0; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; }
+    .main { flex-grow: 1; padding: 20px 20px 120px 20px; margin-left: 200px; }
+    .search { margin: 20px 0; }
+    .search input { width: 100%; padding: 8px; }
+    .filters { display: flex; gap: 15px; align-items: center; margin-bottom: 20px; }
+    .filters select { padding: 8px; min-width: 150px; }
+    .task-list { background: #fff; border: 1px solid #ccc; padding: 10px; }
+    .task-list table { width: 100%; border-collapse: collapse; }
+    .task-list th, .task-list td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    .task-list th { background: #e0e0e0; }
+    .action-btn { padding: 5px 10px; cursor: pointer; }
+    .assign-btn { padding: 5px 10px; cursor: pointer; background: #e0e0e0; border: 1px solid #ccc; }
+    .assign-btn:disabled { cursor: not-allowed; opacity: 0.5; }
+    .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
+    .modal-content { background: #fff; margin: 15% auto; padding: 20px; width: 400px; border: 1px solid #ccc; }
+    .modal-content select, .modal-content input, .modal-content textarea, .modal-content button { width: 100%; margin: 10px 0; padding: 8px; }
+    .modal-content textarea { height: 60px; }
+    .ai-bar { position: fixed; bottom: 0; left: 200px; right: 0; background: #d0d0d0; padding: 10px; height: 100px; display: flex; flex-direction: column; }
+    .ai-bar.minimized { height: 30px; }
+    .ai-bar.minimized .ai-content { display: none; }
+    .ai-bar input { padding: 8px; margin-bottom: 5px; }
+    .ai-bar .response { background: #fff; border: 1px solid #ccc; padding: 5px; height: 40px; overflow-y: auto; }
+    .ai-bar .controls { display: flex; gap: 5px; }
+    .ai-bar button { padding: 5px; cursor: pointer; }
+    @media (max-width: 768px) {
+      .sidebar { width: 150px; }
+      .main { margin-left: 150px; padding: 10px 10px 120px 10px; }
+      .ai-bar { left: 150px; font-size: 14px; }
+      .modal-content { width: 90%; }
+      .filters { flex-wrap: wrap; gap: 10px; }
+      .filters select { min-width: 120px; }
+    }
+    @media (max-width: 600px) {
+      .sidebar { display: none; }
+      .main { margin-left: 0; }
+      .ai-bar { left: 0; }
+      .filters { flex-direction: column; align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <div class="sidebar">
+    <ul>
+      <li><a href="#">Dashboard</a></li>
+      <li><a href="#">Applications</a></li>
+      <li><a href="#">Data Normalization</a></li>
+    </ul>
+  </div>
+  <div class="main">
+    <div class="header">
+      <h1>New Applications</h1>
+      <div>Jane Doe | <a href="#">Logout</a></div>
+    </div>
+    <div class="filters">
+      <select onchange="filterTable('assignment', this.value)">
+        <option value="all">Assignment: All</option>
+        <option value="assigned">Assigned</option>
+        <option value="unassigned">Unassigned</option>
+      </select>
+      <select onchange="filterTable('ingredient', this.value)">
+        <option value="all">Ingredient: All</option>
+        <option value="clean">Clean</option>
+        <option value="needs-work">Needs Work</option>
+      </select>
+      <select onchange="filterTable('overdue', this.value)">
+        <option value="all">Overdue: All</option>
+        <option value="overdue">Overdue</option>
+        <option value="not-overdue">Not Overdue</option>
+      </select>
+      <select onchange="filterTable('stage', this.value)">
+        <option value="all">Stage: All</option>
+        <option value="application-received">Application Received</option>
+        <option value="ncrc-assignment">NCRC Assignment</option>
+        <option value="feasibility-assessment">Feasibility Assessment</option>
+        <option value="inspection-invoice-date">Inspection Invoice Date</option>
+        <option value="inspection-invoice-paid-date">Inspection Invoice Paid Date</option>
+        <option value="rfr-assigned">RFR Assigned</option>
+        <option value="rfr-report">RFR Report</option>
+        <option value="contract-signed">Contract Signed</option>
+        <option value="contract-paid">Contract Paid</option>
+        <option value="certified-date">Certified Date</option>
+      </select>
+    </div>
+    <div class="search">
+      <input type="text" placeholder="Search Applications by Company...">
+    </div>
+    <div class="task-list">
+      <table id="task-table">
+        <tr>
+          <th>Company</th>
+          <th>Stage</th>
+          <th>Status</th>
+          <th>App Received Date</th>
+          <th>Assignment Date</th>
+          <th>Assigned To</th>
+          <th>Assign Task</th>
+        </tr>
+        <tr data-assignment="unassigned" data-ingredient="needs-work" data-overdue="not-overdue" data-stage="application-received">
+          <td>Acme Corp</td><td>Application Received</td><td>Needs Work ⚠️</td><td>2025-05-01</td><td>-</td>
+          <td><button class="assign-btn" onclick="showAssignModal('Acme Corp', 'Scheiner')">Scheiner (AI)</button></td>
+          <td><button class="action-btn" disabled>Assign Task</button></td>
+        </tr>
+        <tr data-assignment="assigned" data-ingredient="clean" data-overdue="overdue" data-stage="ncrc-assignment">
+          <td>Beta Inc</td><td>NCRC Assignment</td><td>Clean ✅</td><td>2025-05-02</td><td>2025-05-05</td>
+          <td><button class="assign-btn" onclick="showAssignModal('Beta Inc', 'Morris')">Morris</button></td>
+          <td><button class="action-btn">View</button></td>
+        </tr>
+        <tr data-assignment="unassigned" data-ingredient="needs-work" data-overdue="not-overdue" data-stage="feasibility-assessment">
+          <td>Gamma Ltd</td><td>Feasibility Assessment</td><td>Needs Work ⚠️</td><td>2025-05-03</td><td>-</td>
+          <td><button class="assign-btn" onclick="showAssignModal('Gamma Ltd', 'Jenkins')">Jenkins (AI)</button></td>
+          <td><button class="action-btn" disabled>Assign Task</button></td>
+        </tr>
+        <tr data-assignment="assigned" data-ingredient="clean" data-overdue="not-overdue" data-stage="inspection-invoice-date">
+          <td>Delta Co</td><td>Inspection Invoice Date</td><td>Clean ✅</td><td>2025-05-04</td><td>2025-05-06</td>
+          <td><button class="assign-btn" onclick="showAssignModal('Delta Co', 'Admin1')">Admin1</button></td>
+          <td><button class="action-btn">View</button></td>
+        </tr>
+        <tr data-assignment="unassigned" data-ingredient="needs-work" data-overdue="overdue" data-stage="inspection-invoice-paid-date">
+          <td>Epsilon Foods</td><td>Inspection Invoice Paid Date</td><td>Needs Work ⚠️</td><td>2025-05-05</td><td>-</td>
+          <td><button class="assign-btn" onclick="showAssignModal('Epsilon Foods', 'Dick')">Dick (AI)</button></td>
+          <td><button class="action-btn" disabled>Assign Task</button></td>
+        </tr>
+        <tr data-assignment="assigned" data-ingredient="clean" data-overdue="not-overdue" data-stage="rfr-assigned">
+          <td>Zeta Brands</td><td>RFR Assigned</td><td>Clean ✅</td><td>2025-05-06</td><td>2025-05-08</td>
+          <td><button class="assign-btn" onclick="showAssignModal('Zeta Brands', 'Rabbi Gersten')">Rabbi Gersten</button></td>
+          <td><button class="action-btn">View</button></td>
+        </tr>
+        <tr data-assignment="unassigned" data-ingredient="needs-work" data-overdue="not-overdue" data-stage="rfr-report">
+          <td>Eta Snacks</td><td>RFR Report</td><td>Needs Work ⚠️</td><td>2025-05-07</td><td>-</td>
+          <td><button class="assign-btn" onclick="showAssignModal('Eta Snacks', 'Katzenstein')">Katzenstein (AI)</button></td>
+          <td><button class="action-btn" disabled>Assign Task</button></td>
+        </tr>
+        <tr data-assignment="assigned" data-ingredient="clean" data-overdue="not-overdue" data-stage="contract-signed">
+          <td>Theta Mills</td><td>Contract Signed</td><td>Clean ✅</td><td>2025-05-08</td><td>2025-05-10</td>
+          <td><button class="assign-btn" onclick="showAssignModal('Theta Mills', 'Bistrocer')">Bistrocer</button></td>
+          <td><button class="action-btn">View</button></td>
+        </tr>
+        <tr data-assignment="unassigned" data-ingredient="needs-work" data-overdue="overdue" data-stage="contract-paid">
+          <td>Iota Dairy</td><td>Contract Paid</td><td>Needs Work ⚠️</td><td>2025-05-09</td><td>-</td>
+          <td><button class="assign-btn" onclick="showAssignModal('Iota Dairy', 'Gutterman')">Gutterman (AI)</button></td>
+          <td><button class="action-btn" disabled>Assign Task</button></td>
+        </tr>
+        <tr data-assignment="assigned" data-ingredient="clean" data-overdue="not-overdue" data-stage="certified-date">
+          <td>Kappa Beverages</td><td>Certified Date</td><td>Clean ✅</td><td>2025-05-10</td><td>2025-05-12</td>
+          <td><button class="assign-btn" onclick="showAssignModal('Kappa Beverages', 'Admin2')">Admin2</button></td>
+          <td><button class="action-btn">View</button></td>
+        </tr>
+      </table>
+    </div>
+    <div id="assign-modal" class="modal">
+      <div class="modal-content">
+        <h3>Assign Task for <span id="company-name"></span></h3>
+        <label>Select Assignee:</label>
+        <select id="assignee-select">
+          <option value="Morris">Morris</option>
+          <option value="Scheiner">Scheiner</option>
+          <option value="Jenkins">Jenkins</option>
+          <option value="Dick">Dick</option>
+          <option value="Rabinowitz">Rabinowitz</option>
+          <option value="Katzenstein">Katzenstein</option>
+          <option value="Bistrocer">Bistrocer</option>
+          <option value="Gutterman">Gutterman</option>
+          <option value="Admin1">Admin1</option>
+          <option value="Admin2">Admin2</option>
+          <option value="Gersten">Rabbi Gersten</option>
+          <option value="Cohen">Rabbi Cohen</option>
+        </select>
+        <label>Due Date:</label>
+        <input type="date" id="due-date" value="2025-05-18" required>
+        <label>AI Reasoning:</label>
+        <textarea id="ai-reason" readonly>Recommended due to low workload</textarea>
+        <button onclick="assignTask()">Assign</button>
+        <button onclick="document.getElementById('assign-modal').style.display='none'">Cancel</button>
+      </div>
+    </div>
+  </div>
+  <div class="ai-bar" id="ai-bar">
+    <div class="ai-content">
+      <div class="response">AI: Ask about assignments or application status...</div>
+      <div class="controls">
+        <input type="text" placeholder="Ask AI...">
+        <button>Send</button>
+      </div>
+    </div>
+    <button onclick="toggleAIBar()">Minimize</button>
+  </div>
+  <script>
+    function toggleAIBar() {
+      const aiBar = document.getElementById('ai-bar');
+      aiBar.classList.toggle('minimized');
+      aiBar.querySelector('button').textContent = aiBar.classList.contains('minimized') ? 'Maximize' : 'Minimize';
+    }
+    function showAssignModal(company, recommendedAssignee) {
+      document.getElementById('company-name').textContent = company;
+      const select = document.getElementById('assignee-select');
+      select.innerHTML = `
+        <option value="Morris">${recommendedAssignee === 'Morris' ? 'Morris (Recommended)' : 'Morris'}</option>
+        <option value="Scheiner">${recommendedAssignee === 'Scheiner' ? 'Scheiner (Recommended)' : 'Scheiner'}</option>
+        <option value="Jenkins">${recommendedAssignee === 'Jenkins' ? 'Jenkins (Recommended)' : 'Jenkins'}</option>
+        <option value="Dick">${recommendedAssignee === 'Dick' ? 'Dick (Recommended)' : 'Dick'}</option>
+        <option value="Rabinowitz">${recommendedAssignee === 'Rabinowitz' ? 'Rabinowitz (Recommended)' : 'Rabinowitz'}</option>
+        <option value="Katzenstein">${recommendedAssignee === 'Katzenstein' ? 'Katzenstein (Recommended)' : 'Katzenstein'}</option>
+        <option value="Bistrocer">${recommendedAssignee === 'Bistrocer' ? 'Bistrocer (Recommended)' : 'Bistrocer'}</option>
+        <option value="Gutterman">${recommendedAssignee === 'Gutterman' ? 'Gutterman (Recommended)' : 'Gutterman'}</option>
+        <option value="Admin1">${recommendedAssignee === 'Admin1' ? 'Admin1 (Recommended)' : 'Admin1'}</option>
+        <option value="Admin2">${recommendedAssignee === 'Admin2' ? 'Admin2 (Recommended)' : 'Admin2'}</option>
+        <option value="Rabbi Gersten">${recommendedAssignee === 'Rabbi Gersten' ? 'Rabbi Gersten (Recommended)' : 'Rabbi Gersten'}</option>
+        <option value="Rabbi Cohen">${recommendedAssignee === 'Rabbi Cohen' ? 'Rabbi Cohen (Recommended)' : 'Rabbi Cohen'}</option>
+      `;
+      select.value = recommendedAssignee;
+      document.getElementById('ai-reason').value = `Recommended: ${recommendedAssignee} due to low workload`;
+      document.getElementById('due-date').value = '2025-05-18';
+      document.getElementById('assign-modal').style.display = 'block';
+    }
+    function assignTask() {
+      document.getElementById('assign-modal').style.display = 'none';
+    }
+    function filterTable(filterType, value) {
+      const rows = document.querySelectorAll('#task-table tr:not(:first-child)');
+      rows.forEach(row => {
+        const assignment = row.getAttribute('data-assignment');
+        const ingredient = row.getAttribute('data-ingredient');
+        const overdue = row.getAttribute('data-overdue');
+        const stage = row.getAttribute('data-stage');
+        let show = true;
+        if (filterType === 'assignment' && value !== 'all' && assignment !== value) show = false;
+        if (filterType === 'ingredient' && value !== 'all' && ingredient !== value) show = false;
+        if (filterType === 'overdue' && value !== 'all' && overdue !== value) show = false;
+        if (filterType === 'stage' && value !== 'all' && stage !== value) show = false;
+        row.style.display = show ? '' : 'none';
+      });
+    }
+  </script>
+</body>
+</html>
